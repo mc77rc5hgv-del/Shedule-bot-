@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from sqlalchemy import inspect
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -22,8 +24,20 @@ def create_engine_and_session(
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
+def _migrate_groups(connection: Connection) -> None:
+    columns = {column["name"] for column in inspect(connection).get_columns("groups")}
+    if "faculty" not in columns:
+        connection.exec_driver_sql(
+            "ALTER TABLE groups ADD COLUMN faculty VARCHAR(150) "
+            "NOT NULL DEFAULT 'Факультет не указан'"
+        )
+    if "course" not in columns:
+        connection.exec_driver_sql("ALTER TABLE groups ADD COLUMN course INTEGER")
+
+
 async def create_schema(engine: AsyncEngine) -> None:
     from schedule_bot import models  # noqa: F401
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(_migrate_groups)

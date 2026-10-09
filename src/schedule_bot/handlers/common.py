@@ -5,19 +5,26 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from schedule_bot.keyboards import groups_keyboard, schedule_keyboard
+from schedule_bot.keyboards import (
+    courses_keyboard,
+    faculties_keyboard,
+    groups_keyboard,
+    schedule_keyboard,
+)
 from schedule_bot.repositories import GroupRepository, UserRepository
 
 router = Router(name="common")
 
 
-async def show_groups(message: Message, session_factory: async_sessionmaker[AsyncSession]) -> None:
+async def show_faculties(
+    message: Message, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
     async with session_factory() as session:
-        groups = await GroupRepository(session).list()
-    if not groups:
+        choices = await GroupRepository(session).list_faculties()
+    if not choices:
         await message.answer("Расписание пока не загружено. Попробуйте позже.")
         return
-    await message.answer("Выберите свою группу:", reply_markup=groups_keyboard(groups))
+    await message.answer("Сначала выберите факультет:", reply_markup=faculties_keyboard(choices))
 
 
 @router.message(CommandStart())
@@ -30,23 +37,82 @@ async def start(message: Message, session_factory: async_sessionmaker[AsyncSessi
             reply_markup=schedule_keyboard,
         )
     else:
-        await show_groups(message, session_factory)
+        await show_faculties(message, session_factory)
 
 
 @router.message(Command("group"))
 @router.message(F.text == "🔄 Сменить группу")
 async def change_group(message: Message, session_factory: async_sessionmaker[AsyncSession]) -> None:
-    await show_groups(message, session_factory)
+    await show_faculties(message, session_factory)
+
+
+@router.callback_query(F.data == "faculties")
+async def return_to_faculties(
+    callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    async with session_factory() as session:
+        choices = await GroupRepository(session).list_faculties()
+    await callback.message.edit_text(
+        "Выберите факультет:", reply_markup=faculties_keyboard(choices)
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("faculty:"))
+async def select_faculty(
+    callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    representative_id = int(callback.data.split(":")[1])
+    async with session_factory() as session:
+        repository = GroupRepository(session)
+        group = await repository.get(representative_id)
+        if group is None:
+            await callback.answer("Факультет больше не доступен", show_alert=True)
+            return
+        choices = await repository.list_courses(group.faculty)
+    await callback.message.edit_text(
+        f"<b>{escape(group.faculty)}</b>\nВыберите курс:",
+        reply_markup=courses_keyboard(choices),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("course:"))
+async def select_course(
+    callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    representative_id = int(callback.data.split(":")[1])
+    async with session_factory() as session:
+        repository = GroupRepository(session)
+        anchor = await repository.get(representative_id)
+        if anchor is None:
+            await callback.answer("Курс больше не доступен", show_alert=True)
+            return
+        groups = await repository.list_by_structure(anchor.faculty, anchor.course)
+    course_label = f"{anchor.course} курс" if anchor.course else "Курс не указан"
+    await callback.message.edit_text(
+        f"<b>{escape(anchor.faculty)}</b> · {course_label}\nВыберите группу:",
+        reply_markup=groups_keyboard(groups, anchor.id),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("groups:"))
 async def paginate_groups(
     callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    page = int(callback.data.split(":")[1])
+    _, anchor_text, page_text = callback.data.split(":")
+    anchor_id, page = int(anchor_text), int(page_text)
     async with session_factory() as session:
-        groups = await GroupRepository(session).list()
-    await callback.message.edit_reply_markup(reply_markup=groups_keyboard(groups, page))
+        repository = GroupRepository(session)
+        anchor = await repository.get(anchor_id)
+        if anchor is None:
+            await callback.answer("Список больше не доступен", show_alert=True)
+            return
+        groups = await repository.list_by_structure(anchor.faculty, anchor.course)
+    await callback.message.edit_reply_markup(
+        reply_markup=groups_keyboard(groups, anchor_id, page)
+    )
     await callback.answer()
 
 
@@ -71,6 +137,6 @@ async def select_group(
 @router.message(F.text == "ℹ️ Помощь")
 async def help_message(message: Message) -> None:
     await message.answer(
-        "Выберите период кнопкой внизу. Команда /group меняет группу. "
+        "Выберите период кнопкой внизу. Команда /group меняет факультет, курс и группу. "
         "Если расписание выглядит неверно, сообщите администратору."
     )

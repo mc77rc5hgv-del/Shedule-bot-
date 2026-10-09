@@ -12,6 +12,8 @@ from schedule_bot.repositories import GroupRepository, LessonRepository
 
 ALIASES = {
     "group": {"group", "группа"},
+    "faculty": {"faculty", "факультет", "институт"},
+    "course": {"course", "курс"},
     "date": {"date", "дата"},
     "start_time": {"start_time", "начало", "время начала"},
     "end_time": {"end_time", "конец", "время конца"},
@@ -31,6 +33,8 @@ class ImportValidationError(ValueError):
 @dataclass(frozen=True, slots=True)
 class LessonRow:
     group: str
+    faculty: str | None
+    course: int | None
     lesson_date: date
     start_time: time
     end_time: time | None
@@ -94,7 +98,7 @@ async def save_schedule(session: AsyncSession, rows: list[LessonRow]) -> ImportR
     for row in rows:
         group = cache.get(row.group)
         if group is None:
-            group = await groups.get_or_create(row.group)
+            group = await groups.get_or_create(row.group, row.faculty, row.course)
             cache[row.group] = group
         is_created = await lessons.upsert(
             group_id=group.id,
@@ -153,6 +157,8 @@ def _parse_row(raw: dict[str, Any]) -> LessonRow:
     subject = _required_text(raw.get("subject"), "предмет")
     return LessonRow(
         group=group,
+        faculty=_optional_text(raw.get("faculty")),
+        course=_course(raw.get("course")),
         lesson_date=_date(raw.get("date")),
         start_time=_time(raw.get("start_time"), "время начала"),
         end_time=_optional_time(raw.get("end_time")),
@@ -173,6 +179,20 @@ def _required_text(value: Any, name: str) -> str:
 def _optional_text(value: Any) -> str | None:
     result = str(value).strip() if value is not None else ""
     return result or None
+
+
+def _course(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    text = str(value).strip().lower().replace("курс", "").strip()
+    if not text.isdigit():
+        raise ValueError("неверный курс (нужно число, например 2)")
+    course = int(text)
+    if not 1 <= course <= 9:
+        raise ValueError("курс должен быть числом от 1 до 9")
+    return course
 
 
 def _date(value: Any) -> date:

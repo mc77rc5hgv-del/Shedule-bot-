@@ -1,9 +1,11 @@
 from datetime import date, datetime, time
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, String, Time, UniqueConstraint, func
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from schedule_bot.db import Base
+
+UNSPECIFIED_FACULTY = "Факультет не указан"
 
 
 class Group(Base):
@@ -11,6 +13,10 @@ class Group(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    faculty: Mapped[str] = mapped_column(
+        String(150), default=UNSPECIFIED_FACULTY, server_default=UNSPECIFIED_FACULTY, index=True
+    )
+    course: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     lessons: Mapped[list["Lesson"]] = relationship(back_populates="group", cascade="all, delete-orphan")
 
 

@@ -14,7 +14,25 @@ schedule_keyboard = ReplyKeyboardMarkup(
 )
 
 
-def groups_keyboard(groups, page: int = 0) -> InlineKeyboardMarkup:
+def faculties_keyboard(choices: list[tuple[str, int]]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for faculty, representative_id in choices:
+        builder.button(text=f"🏛 {faculty}", callback_data=f"faculty:{representative_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def courses_keyboard(choices: list[tuple[int | None, int]]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for course, representative_id in choices:
+        label = f"{course} курс" if course is not None else "Курс не указан"
+        builder.button(text=f"🎓 {label}", callback_data=f"course:{representative_id}")
+    builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="⬅️ К факультетам", callback_data="faculties"))
+    return builder.as_markup()
+
+
+def groups_keyboard(groups, anchor_id: int, page: int = 0) -> InlineKeyboardMarkup:
     page_count = max(1, (len(groups) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = min(max(0, page), page_count - 1)
     builder = InlineKeyboardBuilder()
@@ -23,9 +41,14 @@ def groups_keyboard(groups, page: int = 0) -> InlineKeyboardMarkup:
     builder.adjust(2)
     navigation = []
     if page > 0:
-        navigation.append(InlineKeyboardButton(text="⬅️", callback_data=f"groups:{page - 1}"))
+        navigation.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"groups:{anchor_id}:{page - 1}")
+        )
     if page + 1 < page_count:
-        navigation.append(InlineKeyboardButton(text="➡️", callback_data=f"groups:{page + 1}"))
+        navigation.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"groups:{anchor_id}:{page + 1}")
+        )
     if navigation:
         builder.row(*navigation)
+    builder.row(InlineKeyboardButton(text="⬅️ К курсам", callback_data=f"faculty:{anchor_id}"))
     return builder.as_markup()

@@ -1,4 +1,5 @@
 import io
+from html import escape
 
 from aiogram import F, Bot, Router
 from aiogram.filters import Command
@@ -6,6 +7,7 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from schedule_bot.config import Settings
+from schedule_bot.repositories import GroupRepository
 from schedule_bot.services.importer import ImportValidationError, parse_schedule, save_schedule
 
 router = Router(name="admin")
@@ -23,9 +25,46 @@ async def admin_help(message: Message, settings: Settings) -> None:
     await message.answer(
         "<b>Загрузка расписания</b>\n\n"
         "Отправьте XLSX или CSV как документ. Первая строка — заголовки:\n"
-        "<code>group, date, start_time, end_time, subject, teacher, room, type</code>\n\n"
+        "<code>faculty, course, group, date, start_time, end_time, subject, "
+        "teacher, room, type</code>\n\n"
         "Обязательные поля: group, date, start_time, subject. "
-        "Русские названия колонок тоже поддерживаются. Повторная загрузка обновляет занятие."
+        "Для удобного выбора добавьте faculty и course. Русские названия колонок "
+        "тоже поддерживаются. Повторная загрузка обновляет занятие.\n\n"
+        "Для уже загруженной группы: "
+        "<code>/setgroup Название группы | Факультет | 2</code>"
+    )
+
+
+@router.message(Command("setgroup"))
+async def set_group_structure(
+    message: Message,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    if not is_admin(message, settings):
+        return
+    arguments = message.text.partition(" ")[2]
+    parts = [part.strip() for part in arguments.split("|")]
+    if len(parts) != 3 or not parts[2].isdigit() or not 1 <= int(parts[2]) <= 9:
+        await message.answer(
+            "Формат: <code>/setgroup Название группы | Факультет | 2</code>"
+        )
+        return
+    group_name, faculty, course_text = parts
+    if not group_name or not faculty:
+        await message.answer("Название группы и факультета не должны быть пустыми.")
+        return
+    async with session_factory() as session:
+        repository = GroupRepository(session)
+        group = await repository.get_by_name(group_name)
+        if group is None:
+            await message.answer("Такая группа не найдена.")
+            return
+        await repository.set_structure(group, faculty, int(course_text))
+        await session.commit()
+    await message.answer(
+        f"Группа <b>{escape(group_name)}</b>: "
+        f"{escape(faculty)}, {int(course_text)} курс."
     )
 
 
