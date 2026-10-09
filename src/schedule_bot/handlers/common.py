@@ -1,3 +1,5 @@
+from html import escape
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
@@ -24,7 +26,7 @@ async def start(message: Message, session_factory: async_sessionmaker[AsyncSessi
         user = await UserRepository(session).get_with_group(message.from_user.id)
     if user and user.group:
         await message.answer(
-            f"С возвращением! Ваша группа: <b>{user.group.name}</b>",
+            f"С возвращением! Ваша группа: <b>{escape(user.group.name)}</b>",
             reply_markup=schedule_keyboard,
         )
     else:
@@ -60,7 +62,7 @@ async def select_group(
             return
         await UserRepository(session).set_group(callback.from_user.id, group_id)
         await session.commit()
-    await callback.message.edit_text(f"Вы выбрали группу <b>{group.name}</b>.")
+    await callback.message.edit_text(f"Вы выбрали группу <b>{escape(group.name)}</b>.")
     await callback.message.answer("Что показать?", reply_markup=schedule_keyboard)
     await callback.answer()
 
