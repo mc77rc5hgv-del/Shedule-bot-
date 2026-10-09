@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "schedule-bot"
+version = "0.1.0"
+description = "Telegram bot for importing and viewing group schedules"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "aiogram>=3.13,<4",
+  "aiosqlite>=0.20,<1",
+  "openpyxl>=3.1,<4",
+  "pydantic-settings>=2.5,<3",
+  "SQLAlchemy>=2.0,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "ruff>=0.7,<1",
+]
+
+[project.scripts]
+schedule-bot = "schedule_bot.bot:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schedule_bot"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
