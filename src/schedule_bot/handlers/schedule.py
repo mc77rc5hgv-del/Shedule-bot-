@@ -28,7 +28,9 @@ async def schedule_menu(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(\n    F.data.in_({"schedule:today", "schedule:tomorrow", "schedule:three", "schedule:week"})\n)
+@router.callback_query(
+    F.data.in_({"schedule:today", "schedule:tomorrow", "schedule:three", "schedule:week"})
+)
 async def schedule_callback(
     callback: CallbackQuery,
     session_factory: async_sessionmaker[AsyncSession],
