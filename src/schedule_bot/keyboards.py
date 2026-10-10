@@ -5,15 +5,53 @@ from schedule_bot.structure import FACULTIES, FACULTY_SPECIALTIES, SPECIALTY_LAB
 
 PAGE_SIZE = 12
 
-schedule_keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="📅 Сегодня"), KeyboardButton(text="➡️ Завтра")],
-        [KeyboardButton(text="🗓 Ближайшие 3 дня"), KeyboardButton(text="📆 Неделя")],
-        [KeyboardButton(text="🔄 Сменить группу"), KeyboardButton(text="ℹ️ Помощь")],
-    ],
+home_reply_keyboard = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="🏠 Главное меню")]],
     resize_keyboard=True,
-    input_field_placeholder="Выберите период",
+    input_field_placeholder="Откройте главное меню",
 )
+
+
+def home_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="📅 Расписание", callback_data="schedule:menu"),
+            InlineKeyboardButton(text="⏭ Следующая пара", callback_data="schedule:next"),
+        ],
+        [
+            InlineKeyboardButton(text="👤 Моя группа", callback_data="nav:my_group"),
+            InlineKeyboardButton(text="🔄 Сменить группу", callback_data="nav:groups"),
+        ],
+        [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="nav:help")],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(text="🛠 Админ-панель", callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def schedule_periods_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Сегодня", callback_data="schedule:today"),
+                InlineKeyboardButton(text="Завтра", callback_data="schedule:tomorrow"),
+            ],
+            [
+                InlineKeyboardButton(text="Ближайшие 3 дня", callback_data="schedule:three"),
+                InlineKeyboardButton(text="7 дней", callback_data="schedule:week"),
+            ],
+            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="nav:home")],
+        ]
+    )
+
+
+def schedule_result_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Другой период", callback_data="schedule:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav:home")],
+        ]
+    )
 
 
 def faculties_keyboard() -> InlineKeyboardMarkup:
@@ -23,6 +61,7 @@ def faculties_keyboard() -> InlineKeyboardMarkup:
             text=f"🏛 {faculty} факультет", callback_data=f"faculty_number:{faculty}"
         )
     builder.adjust(2)
+    builder.row(InlineKeyboardButton(text="⬅️ Главное меню", callback_data="nav:home"))
     return builder.as_markup()
 
 
@@ -72,5 +111,53 @@ def groups_keyboard(groups, anchor_id: int, page: int = 0) -> InlineKeyboardMark
         )
     if navigation:
         builder.row(*navigation)
-    builder.row(InlineKeyboardButton(text="⬅️ К курсам", callback_data=f"back_courses:{anchor_id}"))
+    builder.row(
+        InlineKeyboardButton(text="⬅️ К курсам", callback_data=f"back_courses:{anchor_id}")
+    )
     return builder.as_markup()
+
+
+def admin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats"),
+                InlineKeyboardButton(text="👥 Пользователи", callback_data="admin:users:0"),
+            ],
+            [
+                InlineKeyboardButton(text="🎓 Структура групп", callback_data="admin:groups"),
+                InlineKeyboardButton(text="🕘 История загрузок", callback_data="admin:imports"),
+            ],
+            [InlineKeyboardButton(text="📥 Как загрузить файл", callback_data="admin:help")],
+            [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="nav:home")],
+        ]
+    )
+
+
+def admin_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Админ-панель", callback_data="admin:home")]
+        ]
+    )
+
+
+def admin_users_keyboard(page: int, pages: int) -> InlineKeyboardMarkup:
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"admin:users:{page - 1}")
+        )
+    navigation.append(
+        InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="admin:noop")
+    )
+    if page + 1 < pages:
+        navigation.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"admin:users:{page + 1}")
+        )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            navigation,
+            [InlineKeyboardButton(text="⬅️ Админ-панель", callback_data="admin:home")],
+        ]
+    )

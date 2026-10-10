@@ -5,11 +5,13 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from schedule_bot.config import Settings
 from schedule_bot.keyboards import (
     courses_keyboard,
     faculties_keyboard,
     groups_keyboard,
-    schedule_keyboard,
+    home_keyboard,
+    home_reply_keyboard,
     specialties_keyboard,
 )
 from schedule_bot.repositories import GroupRepository, UserRepository
@@ -18,27 +20,109 @@ from schedule_bot.structure import FACULTY_SPECIALTIES, SPECIALTY_LABELS
 router = Router(name="common")
 
 
-async def show_faculties(message: Message) -> None:
-    await message.answer("Выберите факультет:", reply_markup=faculties_keyboard())
+def _group_details(group) -> str:
+    parts = [f"{group.faculty} факультет"]
+    if group.specialty:
+        parts.append(group.specialty)
+    if group.course:
+        parts.append(f"{group.course} курс")
+    parts.append(group.name)
+    return " · ".join(escape(str(part)) for part in parts)
+
+
+async def _home_text(
+    telegram_id: int, session_factory: async_sessionmaker[AsyncSession]
+) -> str:
+    async with session_factory() as session:
+        user = await UserRepository(session).get_with_group(telegram_id)
+    if user and user.group:
+        return (
+            "<b>Главное меню</b>\n"
+            f"Ваша группа: {_group_details(user.group)}\n\n"
+            "Выберите нужный раздел:"
+        )
+    return (
+        "<b>Добро пожаловать в Shedule BOT</b>\n\n"
+        "Сначала выберите свою группу, затем вам станет доступно расписание."
+    )
 
 
 @router.message(CommandStart())
-async def start(message: Message, session_factory: async_sessionmaker[AsyncSession]) -> None:
+@router.message(Command("menu"))
+@router.message(F.text == "🏠 Главное меню")
+async def home(
+    message: Message,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    text = await _home_text(message.from_user.id, session_factory)
+    await message.answer(
+        text,
+        reply_markup=home_keyboard(message.from_user.id in settings.admins),
+    )
+    await message.answer("Быстрый доступ:", reply_markup=home_reply_keyboard)
+
+
+@router.callback_query(F.data == "nav:home")
+async def home_callback(
+    callback: CallbackQuery,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    text = await _home_text(callback.from_user.id, session_factory)
+    await callback.message.edit_text(
+        text,
+        reply_markup=home_keyboard(callback.from_user.id in settings.admins),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "nav:groups")
+@router.message(Command("group"))
+async def change_group(
+    event: Message | CallbackQuery,
+) -> None:
+    text = "Выберите факультет:"
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=faculties_keyboard())
+        await event.answer()
+    else:
+        await event.answer(text, reply_markup=faculties_keyboard())
+
+
+@router.callback_query(F.data == "nav:my_group")
+async def my_group(
+    callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
     async with session_factory() as session:
-        user = await UserRepository(session).get_with_group(message.from_user.id)
-    if user and user.group:
-        await message.answer(
-            f"С возвращением! Ваша группа: <b>{escape(user.group.name)}</b>",
-            reply_markup=schedule_keyboard,
+        user = await UserRepository(session).get_with_group(callback.from_user.id)
+    if not user or not user.group:
+        await callback.message.edit_text(
+            "Группа еще не выбрана.", reply_markup=faculties_keyboard()
         )
     else:
-        await show_faculties(message)
+        await callback.message.edit_text(
+            "<b>Моя группа</b>\n\n" + _group_details(user.group),
+            reply_markup=home_keyboard(),
+        )
+    await callback.answer()
 
 
-@router.message(Command("group"))
-@router.message(F.text == "🔄 Сменить группу")
-async def change_group(message: Message) -> None:
-    await show_faculties(message)
+@router.callback_query(F.data == "nav:help")
+@router.message(Command("help"))
+async def help_message(event: Message | CallbackQuery) -> None:
+    text = (
+        "<b>Как пользоваться ботом</b>\n\n"
+        "1. Выберите факультет, направление, курс и группу.\n"
+        "2. Откройте «Расписание» и укажите период.\n"
+        "3. Кнопка «Следующая пара» сразу покажет ближайшее занятие.\n\n"
+        "Сменить группу можно в главном меню. Бот запомнит ваш выбор."
+    )
+    if isinstance(event, CallbackQuery):
+        await event.message.edit_text(text, reply_markup=home_keyboard())
+        await event.answer()
+    else:
+        await event.answer(text)
 
 
 @router.callback_query(F.data == "faculties")
@@ -127,12 +211,11 @@ async def select_course(
         groups = await repository.list_by_structure(
             anchor.faculty, anchor.specialty, anchor.course
         )
-    course_label = f"{anchor.course} курс" if anchor.course else "Курс не указан"
     title = f"{anchor.faculty} факультет"
     if anchor.specialty:
         title += f" · {anchor.specialty}"
     await callback.message.edit_text(
-        f"<b>{escape(title)}</b> · {course_label}\nВыберите группу:",
+        f"<b>{escape(title)}</b> · {anchor.course} курс\nВыберите группу:",
         reply_markup=groups_keyboard(groups, anchor.id),
     )
     await callback.answer()
@@ -161,7 +244,9 @@ async def paginate_groups(
 
 @router.callback_query(F.data.startswith("group:"))
 async def select_group(
-    callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
+    callback: CallbackQuery,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     group_id = int(callback.data.split(":")[1])
     async with session_factory() as session:
@@ -171,15 +256,8 @@ async def select_group(
             return
         await UserRepository(session).set_group(callback.from_user.id, group_id)
         await session.commit()
-    await callback.message.edit_text(f"Вы выбрали группу <b>{escape(group.name)}</b>.")
-    await callback.message.answer("Что показать?", reply_markup=schedule_keyboard)
-    await callback.answer()
-
-
-@router.message(Command("help"))
-@router.message(F.text == "ℹ️ Помощь")
-async def help_message(message: Message) -> None:
-    await message.answer(
-        "Команда /group открывает выбор факультета, направления, курса и группы. "
-        "Затем выберите нужный период кнопкой внизу."
+    await callback.message.edit_text(
+        "✅ Группа сохранена\n\n" + _group_details(group),
+        reply_markup=home_keyboard(callback.from_user.id in settings.admins),
     )
+    await callback.answer("Группа сохранена")

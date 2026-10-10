@@ -24,17 +24,27 @@ def create_engine_and_session(
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-def _migrate_groups(connection: Connection) -> None:
-    columns = {column["name"] for column in inspect(connection).get_columns("groups")}
-    if "faculty" not in columns:
-        connection.exec_driver_sql(
-            "ALTER TABLE groups ADD COLUMN faculty VARCHAR(150) "
-            "NOT NULL DEFAULT 'Факультет не указан'"
-        )
-    if "specialty" not in columns:
-        connection.exec_driver_sql("ALTER TABLE groups ADD COLUMN specialty VARCHAR(100)")
-    if "course" not in columns:
-        connection.exec_driver_sql("ALTER TABLE groups ADD COLUMN course INTEGER")
+def _add_column(connection: Connection, table: str, name: str, definition: str) -> None:
+    columns = {column["name"] for column in inspect(connection).get_columns(table)}
+    if name not in columns:
+        connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+
+def _migrate(connection: Connection) -> None:
+    _add_column(
+        connection,
+        "groups",
+        "faculty",
+        "VARCHAR(150) NOT NULL DEFAULT 'Факультет не указан'",
+    )
+    _add_column(connection, "groups", "specialty", "VARCHAR(100)")
+    _add_column(connection, "groups", "course", "INTEGER")
+    _add_column(connection, "users", "username", "VARCHAR(64)")
+    _add_column(connection, "users", "first_name", "VARCHAR(128)")
+    _add_column(connection, "users", "last_name", "VARCHAR(128)")
+    _add_column(connection, "users", "created_at", "DATETIME")
+    _add_column(connection, "users", "last_seen_at", "DATETIME")
+    _add_column(connection, "users", "interactions", "INTEGER NOT NULL DEFAULT 0")
 
 
 async def create_schema(engine: AsyncEngine) -> None:
@@ -42,4 +52,4 @@ async def create_schema(engine: AsyncEngine) -> None:
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
-        await connection.run_sync(_migrate_groups)
+        await connection.run_sync(_migrate)

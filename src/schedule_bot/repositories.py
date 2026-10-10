@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from schedule_bot.models import Group, Lesson, UNSPECIFIED_FACULTY, User
+from schedule_bot.models import Group, ImportLog, Lesson, UNSPECIFIED_FACULTY, User
 
 
 class GroupRepository:
@@ -23,33 +23,28 @@ class GroupRepository:
     async def list_courses(
         self, faculty: str, specialty: str | None
     ) -> list[tuple[int | None, int]]:
-        statement = select(Group).where(Group.faculty == faculty)
+        statement = select(Group.course, func.min(Group.id)).where(Group.faculty == faculty)
         if specialty is None:
             statement = statement.where(Group.specialty.is_(None))
         else:
             statement = statement.where(Group.specialty == specialty)
-        rows = await self.session.execute(
-            statement.with_only_columns(Group.course, Group.id)
-            .distinct(Group.course)
-            .order_by(Group.course, Group.id)
-        )
-        choices: dict[int | None, int] = {}
-        for course, group_id in rows:
-            choices.setdefault(course, group_id)
-        return list(choices.items())
+        rows = await self.session.execute(statement.group_by(Group.course).order_by(Group.course))
+        return list(rows)
 
     async def list_by_structure(
         self, faculty: str, specialty: str | None, course: int | None
     ) -> list[Group]:
         statement = select(Group).where(Group.faculty == faculty)
-        if specialty is None:
-            statement = statement.where(Group.specialty.is_(None))
-        else:
-            statement = statement.where(Group.specialty == specialty)
-        if course is None:
-            statement = statement.where(Group.course.is_(None))
-        else:
-            statement = statement.where(Group.course == course)
+        statement = (
+            statement.where(Group.specialty.is_(None))
+            if specialty is None
+            else statement.where(Group.specialty == specialty)
+        )
+        statement = (
+            statement.where(Group.course.is_(None))
+            if course is None
+            else statement.where(Group.course == course)
+        )
         result = await self.session.scalars(statement.order_by(Group.name))
         return list(result)
 
@@ -96,10 +91,46 @@ class UserRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def touch(
+        self,
+        telegram_id: int,
+        username: str | None,
+        first_name: str | None,
+        last_name: str | None,
+    ) -> None:
+        now = datetime.now(UTC)
+        user = await self.session.get(User, telegram_id)
+        if user is None:
+            user = User(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                created_at=now,
+                last_seen_at=now,
+                interactions=1,
+            )
+            self.session.add(user)
+        else:
+            user.username = username
+            user.first_name = first_name
+            user.last_name = last_name
+            user.last_seen_at = now
+            user.interactions = (user.interactions or 0) + 1
+
     async def set_group(self, telegram_id: int, group_id: int) -> None:
         user = await self.session.get(User, telegram_id)
         if user is None:
-            self.session.add(User(telegram_id=telegram_id, group_id=group_id))
+            now = datetime.now(UTC)
+            self.session.add(
+                User(
+                    telegram_id=telegram_id,
+                    group_id=group_id,
+                    created_at=now,
+                    last_seen_at=now,
+                    interactions=1,
+                )
+            )
         else:
             user.group_id = group_id
 
@@ -109,6 +140,17 @@ class UserRepository:
             .options(selectinload(User.group))
             .where(User.telegram_id == telegram_id)
         )
+
+    async def page(self, page: int, page_size: int = 10) -> tuple[list[User], int]:
+        total = await self.session.scalar(select(func.count()).select_from(User)) or 0
+        users = await self.session.scalars(
+            select(User)
+            .options(selectinload(User.group))
+            .order_by(User.last_seen_at.desc(), User.telegram_id)
+            .offset(page * page_size)
+            .limit(page_size)
+        )
+        return list(users), total
 
 
 class LessonRepository:
@@ -126,6 +168,26 @@ class LessonRepository:
             .order_by(Lesson.lesson_date, Lesson.start_time)
         )
         return list(result)
+
+    async def next_lesson(
+        self, group_id: int, current_date: date, current_time: time
+    ) -> Lesson | None:
+        return await self.session.scalar(
+            select(Lesson)
+            .where(
+                Lesson.group_id == group_id,
+                Lesson.lesson_date <= current_date + timedelta(days=30),
+                (
+                    (Lesson.lesson_date > current_date)
+                    | (
+                        (Lesson.lesson_date == current_date)
+                        & (Lesson.start_time >= current_time)
+                    )
+                ),
+            )
+            .order_by(Lesson.lesson_date, Lesson.start_time)
+            .limit(1)
+        )
 
     async def upsert(
         self,
@@ -156,3 +218,69 @@ class LessonRepository:
         lesson.room = room
         lesson.lesson_type = lesson_type
         return created
+
+
+class StatisticsRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def dashboard(self) -> dict[str, int]:
+        now = datetime.now(UTC)
+        today = now.date()
+        result = {}
+        result["users"] = await self.session.scalar(select(func.count()).select_from(User)) or 0
+        for key, delta in (("active_day", 1), ("active_week", 7), ("active_month", 30)):
+            result[key] = (
+                await self.session.scalar(
+                    select(func.count())
+                    .select_from(User)
+                    .where(User.last_seen_at >= now - timedelta(days=delta))
+                )
+                or 0
+            )
+        result["groups"] = await self.session.scalar(select(func.count()).select_from(Group)) or 0
+        result["lessons"] = await self.session.scalar(select(func.count()).select_from(Lesson)) or 0
+        result["upcoming"] = (
+            await self.session.scalar(
+                select(func.count()).select_from(Lesson).where(Lesson.lesson_date >= today)
+            )
+            or 0
+        )
+        return result
+
+    async def group_breakdown(self) -> list[tuple[str, str | None, int | None, int]]:
+        rows = await self.session.execute(
+            select(Group.faculty, Group.specialty, Group.course, func.count(Group.id))
+            .group_by(Group.faculty, Group.specialty, Group.course)
+            .order_by(Group.faculty, Group.specialty, Group.course)
+        )
+        return list(rows)
+
+
+class ImportLogRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        admin_telegram_id: int,
+        filename: str,
+        total_rows: int,
+        created_rows: int,
+        updated_rows: int,
+    ) -> None:
+        self.session.add(
+            ImportLog(
+                admin_telegram_id=admin_telegram_id,
+                filename=filename[:255],
+                total_rows=total_rows,
+                created_rows=created_rows,
+                updated_rows=updated_rows,
+            )
+        )
+
+    async def recent(self, limit: int = 10) -> list[ImportLog]:
+        result = await self.session.scalars(
+            select(ImportLog).order_by(ImportLog.imported_at.desc()).limit(limit)
+        )
+        return list(result)

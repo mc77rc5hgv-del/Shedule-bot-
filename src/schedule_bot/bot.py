@@ -8,6 +8,7 @@ from aiogram.enums import ParseMode
 from schedule_bot.config import Settings
 from schedule_bot.db import create_engine_and_session, create_schema
 from schedule_bot.handlers import setup_router
+from schedule_bot.middleware import UserTrackingMiddleware
 
 
 async def run() -> None:
@@ -17,6 +18,7 @@ async def run() -> None:
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dispatcher = Dispatcher()
+    dispatcher.update.outer_middleware(UserTrackingMiddleware(session_factory))
     dispatcher.include_router(setup_router())
 
     try:

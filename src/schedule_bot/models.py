@@ -26,6 +26,12 @@ class User(Base):
 
     telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"))
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    interactions: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -48,3 +54,17 @@ class Lesson(Base):
     room: Mapped[str | None] = mapped_column(String(100), nullable=True)
     lesson_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     group: Mapped[Group] = relationship(back_populates="lessons")
+
+
+class ImportLog(Base):
+    __tablename__ = "import_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    admin_telegram_id: Mapped[int] = mapped_column(BigInteger)
+    filename: Mapped[str] = mapped_column(String(255))
+    total_rows: Mapped[int] = mapped_column(Integer)
+    created_rows: Mapped[int] = mapped_column(Integer)
+    updated_rows: Mapped[int] = mapped_column(Integer)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
