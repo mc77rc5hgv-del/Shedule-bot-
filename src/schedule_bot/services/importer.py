@@ -9,11 +9,13 @@ from openpyxl import load_workbook
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from schedule_bot.repositories import GroupRepository, LessonRepository
+from schedule_bot.structure import normalize_faculty, normalize_specialty
 
 ALIASES = {
     "group": {"group", "группа"},
     "faculty": {"faculty", "факультет", "институт"},
     "course": {"course", "курс"},
+    "specialty": {"specialty", "направление", "специальность", "профиль"},
     "date": {"date", "дата"},
     "start_time": {"start_time", "начало", "время начала"},
     "end_time": {"end_time", "конец", "время конца"},
@@ -22,7 +24,7 @@ ALIASES = {
     "room": {"room", "аудитория", "кабинет"},
     "lesson_type": {"type", "lesson_type", "тип", "вид занятия"},
 }
-REQUIRED = {"group", "date", "start_time", "subject"}
+REQUIRED = {"faculty", "course", "group", "date", "start_time", "subject"}
 MAX_ROWS = 20_000
 
 
@@ -33,8 +35,9 @@ class ImportValidationError(ValueError):
 @dataclass(frozen=True, slots=True)
 class LessonRow:
     group: str
-    faculty: str | None
-    course: int | None
+    faculty: str
+    specialty: str | None
+    course: int
     lesson_date: date
     start_time: time
     end_time: time | None
@@ -98,7 +101,9 @@ async def save_schedule(session: AsyncSession, rows: list[LessonRow]) -> ImportR
     for row in rows:
         group = cache.get(row.group)
         if group is None:
-            group = await groups.get_or_create(row.group, row.faculty, row.course)
+            group = await groups.get_or_create(
+                row.group, row.faculty, row.specialty, row.course
+            )
             cache[row.group] = group
         is_created = await lessons.upsert(
             group_id=group.id,
@@ -155,10 +160,16 @@ def _map_headers(raw_headers: list[Any]) -> dict[str, int]:
 def _parse_row(raw: dict[str, Any]) -> LessonRow:
     group = _required_text(raw.get("group"), "группа")
     subject = _required_text(raw.get("subject"), "предмет")
+    faculty = normalize_faculty(raw.get("faculty"))
+    specialty = normalize_specialty(raw.get("specialty"), faculty)
+    course = _course(raw.get("course"))
+    if course is None:
+        raise ValueError("не заполнено поле «курс»")
     return LessonRow(
         group=group,
-        faculty=_optional_text(raw.get("faculty")),
-        course=_course(raw.get("course")),
+        faculty=faculty,
+        specialty=specialty,
+        course=course,
         lesson_date=_date(raw.get("date")),
         start_time=_time(raw.get("start_time"), "время начала"),
         end_time=_optional_time(raw.get("end_time")),

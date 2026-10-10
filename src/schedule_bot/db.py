@@ -31,6 +31,8 @@ def _migrate_groups(connection: Connection) -> None:
             "ALTER TABLE groups ADD COLUMN faculty VARCHAR(150) "
             "NOT NULL DEFAULT 'Факультет не указан'"
         )
+    if "specialty" not in columns:
+        connection.exec_driver_sql("ALTER TABLE groups ADD COLUMN specialty VARCHAR(100)")
     if "course" not in columns:
         connection.exec_driver_sql("ALTER TABLE groups ADD COLUMN course INTEGER")
 

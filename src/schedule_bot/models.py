@@ -16,6 +16,7 @@ class Group(Base):
     faculty: Mapped[str] = mapped_column(
         String(150), default=UNSPECIFIED_FACULTY, server_default=UNSPECIFIED_FACULTY, index=True
     )
+    specialty: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     course: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     lessons: Mapped[list["Lesson"]] = relationship(back_populates="group", cascade="all, delete-orphan")
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,29 +16,36 @@ class GroupRepository:
 
     async def list(self) -> list[Group]:
         result = await self.session.scalars(
-            select(Group).order_by(Group.faculty, Group.course, Group.name)
+            select(Group).order_by(Group.faculty, Group.specialty, Group.course, Group.name)
         )
         return list(result)
 
-    async def list_faculties(self) -> list[tuple[str, int]]:
-        rows = await self.session.execute(
-            select(Group.faculty, func.min(Group.id))
-            .group_by(Group.faculty)
-            .order_by(Group.faculty)
-        )
-        return [(faculty or UNSPECIFIED_FACULTY, group_id) for faculty, group_id in rows]
-
-    async def list_courses(self, faculty: str) -> list[tuple[int | None, int]]:
-        rows = await self.session.execute(
-            select(Group.course, func.min(Group.id))
-            .where(Group.faculty == faculty)
-            .group_by(Group.course)
-            .order_by(Group.course)
-        )
-        return list(rows)
-
-    async def list_by_structure(self, faculty: str, course: int | None) -> list[Group]:
+    async def list_courses(
+        self, faculty: str, specialty: str | None
+    ) -> list[tuple[int | None, int]]:
         statement = select(Group).where(Group.faculty == faculty)
+        if specialty is None:
+            statement = statement.where(Group.specialty.is_(None))
+        else:
+            statement = statement.where(Group.specialty == specialty)
+        rows = await self.session.execute(
+            statement.with_only_columns(Group.course, Group.id)
+            .distinct(Group.course)
+            .order_by(Group.course, Group.id)
+        )
+        choices: dict[int | None, int] = {}
+        for course, group_id in rows:
+            choices.setdefault(course, group_id)
+        return list(choices.items())
+
+    async def list_by_structure(
+        self, faculty: str, specialty: str | None, course: int | None
+    ) -> list[Group]:
+        statement = select(Group).where(Group.faculty == faculty)
+        if specialty is None:
+            statement = statement.where(Group.specialty.is_(None))
+        else:
+            statement = statement.where(Group.specialty == specialty)
         if course is None:
             statement = statement.where(Group.course.is_(None))
         else:
@@ -53,13 +60,18 @@ class GroupRepository:
         return await self.session.scalar(select(Group).where(Group.name == name))
 
     async def get_or_create(
-        self, name: str, faculty: str | None = None, course: int | None = None
+        self,
+        name: str,
+        faculty: str | None = None,
+        specialty: str | None = None,
+        course: int | None = None,
     ) -> Group:
         group = await self.get_by_name(name)
         if group is None:
             group = Group(
                 name=name,
                 faculty=faculty or UNSPECIFIED_FACULTY,
+                specialty=specialty,
                 course=course,
             )
             self.session.add(group)
@@ -67,12 +79,16 @@ class GroupRepository:
         else:
             if faculty:
                 group.faculty = faculty
+            group.specialty = specialty
             if course is not None:
                 group.course = course
         return group
 
-    async def set_structure(self, group: Group, faculty: str, course: int) -> None:
+    async def set_structure(
+        self, group: Group, faculty: str, specialty: str | None, course: int
+    ) -> None:
         group.faculty = faculty
+        group.specialty = specialty
         group.course = course
 
 

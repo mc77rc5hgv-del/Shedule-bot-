@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from schedule_bot.config import Settings
 from schedule_bot.repositories import GroupRepository
 from schedule_bot.services.importer import ImportValidationError, parse_schedule, save_schedule
+from schedule_bot.structure import normalize_faculty, normalize_specialty
 
 router = Router(name="admin")
 MAX_FILE_SIZE = 5 * 1024 * 1024
@@ -24,14 +25,15 @@ async def admin_help(message: Message, settings: Settings) -> None:
         return
     await message.answer(
         "<b>Загрузка расписания</b>\n\n"
-        "Отправьте XLSX или CSV как документ. Первая строка — заголовки:\n"
-        "<code>faculty, course, group, date, start_time, end_time, subject, "
-        "teacher, room, type</code>\n\n"
-        "Обязательные поля: group, date, start_time, subject. "
-        "Для удобного выбора добавьте faculty и course. Русские названия колонок "
-        "тоже поддерживаются. Повторная загрузка обновляет занятие.\n\n"
-        "Для уже загруженной группы: "
-        "<code>/setgroup Название группы | Факультет | 2</code>"
+        "Колонки XLSX/CSV:\n"
+        "<code>faculty, specialty, course, group, date, start_time, end_time, "
+        "subject, teacher, room, type</code>\n\n"
+        "Обязательны: faculty, course, group, date, start_time, subject. "
+        "Для факультетов 2, 3, 4 и 7 также обязательно направление. "
+        "Русские названия колонок поддерживаются.\n\n"
+        "Ручная настройка: "
+        "<code>/setgroup Группа | 3 | Лечебное дело | 2</code>. "
+        "Для 5 и 8 факультетов вместо направления укажите дефис."
     )
 
 
@@ -43,16 +45,18 @@ async def set_group_structure(
 ) -> None:
     if not is_admin(message, settings):
         return
-    arguments = message.text.partition(" ")[2]
-    parts = [part.strip() for part in arguments.split("|")]
-    if len(parts) != 3 or not parts[2].isdigit() or not 1 <= int(parts[2]) <= 9:
+    parts = [part.strip() for part in message.text.partition(" ")[2].split("|")]
+    if len(parts) != 4 or not parts[3].isdigit() or not 1 <= int(parts[3]) <= 9:
         await message.answer(
-            "Формат: <code>/setgroup Название группы | Факультет | 2</code>"
+            "Формат: <code>/setgroup Группа | 3 | Лечебное дело | 2</code>"
         )
         return
-    group_name, faculty, course_text = parts
-    if not group_name or not faculty:
-        await message.answer("Название группы и факультета не должны быть пустыми.")
+    group_name, faculty_raw, specialty_raw, course_text = parts
+    try:
+        faculty = normalize_faculty(faculty_raw)
+        specialty = normalize_specialty(specialty_raw, faculty)
+    except ValueError as error:
+        await message.answer(str(error))
         return
     async with session_factory() as session:
         repository = GroupRepository(session)
@@ -60,11 +64,13 @@ async def set_group_structure(
         if group is None:
             await message.answer("Такая группа не найдена.")
             return
-        await repository.set_structure(group, faculty, int(course_text))
+        await repository.set_structure(group, faculty, specialty, int(course_text))
         await session.commit()
+    details = f"{faculty} факультет"
+    if specialty:
+        details += f", {specialty}"
     await message.answer(
-        f"Группа <b>{escape(group_name)}</b>: "
-        f"{escape(faculty)}, {int(course_text)} курс."
+        f"Группа <b>{escape(group_name)}</b>: {escape(details)}, {int(course_text)} курс."
     )
 
 
