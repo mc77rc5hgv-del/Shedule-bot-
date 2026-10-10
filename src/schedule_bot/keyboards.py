@@ -2,6 +2,11 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardBu
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 PAGE_SIZE = 12
+FACULTIES = {
+    "medical": "Лечебное дело",
+    "dentistry": "Стоматология",
+    "mpd": "МПД",
+}
 
 schedule_keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -14,10 +19,18 @@ schedule_keyboard = ReplyKeyboardMarkup(
 )
 
 
-def faculties_keyboard(choices: list[tuple[str, int]]) -> InlineKeyboardMarkup:
+def faculty_root_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🏛 Все факультеты", callback_data="faculty_catalog")]
+        ]
+    )
+
+
+def faculties_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for faculty, representative_id in choices:
-        builder.button(text=f"🏛 {faculty}", callback_data=f"faculty:{representative_id}")
+    for code, name in FACULTIES.items():
+        builder.button(text=name, callback_data=f"faculty_name:{code}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -28,7 +41,9 @@ def courses_keyboard(choices: list[tuple[int | None, int]]) -> InlineKeyboardMar
         label = f"{course} курс" if course is not None else "Курс не указан"
         builder.button(text=f"🎓 {label}", callback_data=f"course:{representative_id}")
     builder.adjust(2)
-    builder.row(InlineKeyboardButton(text="⬅️ К факультетам", callback_data="faculties"))
+    builder.row(
+        InlineKeyboardButton(text="⬅️ К факультетам", callback_data="faculty_catalog")
+    )
     return builder.as_markup()
 
 

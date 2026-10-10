@@ -6,8 +6,10 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from schedule_bot.keyboards import (
+    FACULTIES,
     courses_keyboard,
     faculties_keyboard,
+    faculty_root_keyboard,
     groups_keyboard,
     schedule_keyboard,
 )
@@ -16,15 +18,17 @@ from schedule_bot.repositories import GroupRepository, UserRepository
 router = Router(name="common")
 
 
-async def show_faculties(
+async def show_faculty_root(
     message: Message, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     async with session_factory() as session:
-        choices = await GroupRepository(session).list_faculties()
-    if not choices:
+        groups = await GroupRepository(session).list()
+    if not groups:
         await message.answer("Расписание пока не загружено. Попробуйте позже.")
         return
-    await message.answer("Сначала выберите факультет:", reply_markup=faculties_keyboard(choices))
+    await message.answer(
+        "Откройте список факультетов:", reply_markup=faculty_root_keyboard()
+    )
 
 
 @router.message(CommandStart())
@@ -37,29 +41,48 @@ async def start(message: Message, session_factory: async_sessionmaker[AsyncSessi
             reply_markup=schedule_keyboard,
         )
     else:
-        await show_faculties(message, session_factory)
+        await show_faculty_root(message, session_factory)
 
 
 @router.message(Command("group"))
 @router.message(F.text == "🔄 Сменить группу")
 async def change_group(message: Message, session_factory: async_sessionmaker[AsyncSession]) -> None:
-    await show_faculties(message, session_factory)
+    await show_faculty_root(message, session_factory)
 
 
-@router.callback_query(F.data == "faculties")
-async def return_to_faculties(
+@router.callback_query(F.data == "faculty_catalog")
+async def show_faculty_catalog(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "Выберите факультет:", reply_markup=faculties_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("faculty_name:"))
+async def select_named_faculty(
     callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
+    code = callback.data.split(":", 1)[1]
+    faculty = FACULTIES.get(code)
+    if faculty is None:
+        await callback.answer("Факультет не найден", show_alert=True)
+        return
     async with session_factory() as session:
-        choices = await GroupRepository(session).list_faculties()
+        choices = await GroupRepository(session).list_courses(faculty)
+    if not choices:
+        await callback.answer(
+            f"Для «{faculty}» расписание пока не загружено", show_alert=True
+        )
+        return
     await callback.message.edit_text(
-        "Выберите факультет:", reply_markup=faculties_keyboard(choices)
+        f"<b>{escape(faculty)}</b>\nВыберите курс:",
+        reply_markup=courses_keyboard(choices),
     )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("faculty:"))
-async def select_faculty(
+async def return_to_courses(
     callback: CallbackQuery, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     representative_id = int(callback.data.split(":")[1])
