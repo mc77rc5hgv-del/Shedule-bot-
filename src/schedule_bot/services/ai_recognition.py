@@ -2,6 +2,7 @@ import base64
 import csv
 import io
 import json
+import logging
 from dataclasses import dataclass
 
 import aiohttp
@@ -9,6 +10,7 @@ import aiohttp
 from schedule_bot.services.importer import ImportValidationError, LessonRow, parse_schedule, submission_identity
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """Распознай расписание медицинского вуза и верни только JSON без Markdown:
 {"status":"ready|needs_info","missing_fields":[],"questions":[],"warnings":[],
 "schedule":{"faculty":"2|3|4|5|7|8","specialty":"Лечебное дело|Стоматология|МПД|null",
@@ -70,7 +72,15 @@ async def recognize_schedule(
             ) as response:
                 data = await response.json(content_type=None)
                 if response.status >= 400:
-                    detail = data.get("error", {}).get("message", "ошибка AI-сервиса")
+                    error_data = data.get("error", {})
+                    detail = error_data.get("message", "ошибка AI-сервиса")
+                    logger.warning(
+                        "Anthropic request failed: status=%s type=%s message=%s request_id=%s",
+                        response.status,
+                        error_data.get("type"),
+                        detail,
+                        response.headers.get("request-id"),
+                    )
                     raise AIRecognitionError("AI не смог обработать файл: " + detail)
     except TimeoutError as error:
         raise AIRecognitionError("AI не успел обработать файл. Попробуйте ещё раз.") from error

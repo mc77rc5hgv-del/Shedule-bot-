@@ -1,4 +1,5 @@
 import io
+import logging
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -15,6 +16,7 @@ from schedule_bot.services.ai_recognition import (
 from schedule_bot.keyboards import submission_help_keyboard
 
 router = Router(name="submissions")
+logger = logging.getLogger(__name__)
 
 TEMPLATE = (
     "faculty,specialty,course,group,date,start_time,end_time,subject,teacher,room,type\n"
@@ -199,6 +201,7 @@ async def _recognize_media(
                 + "\n".join(f"• {escape(value)}" for value in result.warnings)
             )
     except AIRecognitionError as error:
+        logger.warning("Schedule recognition rejected: %s", error)
         await status.edit_text(
             "<b>Не удалось распознать расписание</b>\n\n"
             f"{escape(str(error))}\n\n"
