@@ -7,7 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from schedule_bot.models import (\n    Group, ImportLog, Lesson, ScheduleSubmission, UNSPECIFIED_FACULTY, User,\n)
+from schedule_bot.models import (
+    Group,
+    ImportLog,
+    Lesson,
+    ScheduleSubmission,
+    UNSPECIFIED_FACULTY,
+    User,
+)
 
 
 class GroupRepository:
