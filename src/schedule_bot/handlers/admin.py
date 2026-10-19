@@ -288,6 +288,11 @@ async def admin_submission_file(
     if item is None:
         await callback.answer("Заявка не найдена", show_alert=True)
         return
+    if item.source_file_content and item.source_filename:
+        await callback.message.answer_document(
+            BufferedInputFile(item.source_file_content, filename=item.source_filename),
+            caption=f"Исходный файл заявки #{item.id}",
+        )
     await callback.message.answer_document(
         BufferedInputFile(item.file_content, filename=item.filename),
         caption=_submission_details(item),
@@ -382,45 +387,47 @@ async def _download_document(message: Message, bot: Bot) -> tuple[str, bytes]:
     return filename, buffer.getvalue()
 
 
-async def _submit_user_schedule(
+async def store_user_submission(
+    *,
     message: Message,
     bot: Bot,
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
+    status: Message,
+    filename: str,
+    content: bytes,
+    rows,
+    source_filename: str | None = None,
+    source_content: bytes | None = None,
+    source_media_type: str | None = None,
 ) -> None:
-    status = await message.answer("Проверяю файл перед отправкой администратору…")
-    try:
-        filename, content = await _download_document(message, bot)
-        rows = parse_schedule(filename, content)
-        group_name, faculty, specialty, course = submission_identity(rows)
-        async with session_factory() as session:
-            item = await SubmissionRepository(session).add(
-                user_telegram_id=message.from_user.id,
-                username=message.from_user.username,
-                filename=filename,
-                file_content=content,
-                faculty=faculty,
-                specialty=specialty,
-                course=course,
-                group_name=group_name,
-                total_rows=len(rows),
-            )
-            await session.commit()
-    except ImportValidationError as error:
-        await status.edit_text(
-            "<b>Файл не принят</b>\n\n"
-            f"{escape(str(error))}\n\n"
-            "Откройте «Добавить расписание», скачайте шаблон или используйте промпт "
-            "для нейросети."
+    group_name, faculty, specialty, course = submission_identity(rows)
+    async with session_factory() as session:
+        item = await SubmissionRepository(session).add(
+            user_telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            filename=filename,
+            file_content=content,
+            source_filename=source_filename,
+            source_file_content=source_content,
+            source_media_type=source_media_type,
+            faculty=faculty,
+            specialty=specialty,
+            course=course,
+            group_name=group_name,
+            total_rows=len(rows),
         )
-        return
-    except Exception:
-        await status.edit_text("Не удалось обработать файл из-за внутренней ошибки.")
-        raise
+        await session.commit()
 
     delivered = 0
     for admin_id in settings.admins:
         try:
+            if source_content and source_filename:
+                await bot.send_document(
+                    admin_id,
+                    BufferedInputFile(source_content, filename=source_filename),
+                    caption=f"Исходник для заявки #{item.id}",
+                )
             await bot.send_document(
                 admin_id,
                 BufferedInputFile(content, filename=filename),
@@ -431,6 +438,11 @@ async def _submit_user_schedule(
         except Exception:
             logger.exception("Could not deliver submission %s to admin %s", item.id, admin_id)
 
+    if source_content:
+        await message.answer_document(
+            BufferedInputFile(content, filename=filename),
+            caption="ИИ подготовил этот CSV. Окончательную проверку выполнит администратор.",
+        )
     await status.edit_text(
         "<b>✅ Заявка отправлена</b>\n\n"
         f"Группа: <b>{escape(group_name)}</b>\n"
@@ -438,6 +450,37 @@ async def _submit_user_schedule(
         "Администратор проверит расписание. После решения бот пришлет уведомление."
         + ("" if delivered else "\n\nЗаявка сохранена и доступна в админ-панели.")
     )
+
+
+async def _submit_user_schedule(
+    message: Message,
+    bot: Bot,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    status = await message.answer("Проверяю файл перед отправкой администратору…")
+    try:
+        filename, content = await _download_document(message, bot)
+        rows = parse_schedule(filename, content)
+        await store_user_submission(
+            message=message,
+            bot=bot,
+            settings=settings,
+            session_factory=session_factory,
+            status=status,
+            filename=filename,
+            content=content,
+            rows=rows,
+        )
+    except ImportValidationError as error:
+        await status.edit_text(
+            "<b>Файл не принят</b>\n\n"
+            f"{escape(str(error))}\n\n"
+            "Можно отправить фото или PDF — ИИ попробует распознать расписание."
+        )
+    except Exception:
+        await status.edit_text("Не удалось обработать файл из-за внутренней ошибки.")
+        raise
 
 
 @router.message(F.document)

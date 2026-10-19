@@ -45,6 +45,10 @@ def _migrate(connection: Connection) -> None:
     _add_column(connection, "users", "created_at", "DATETIME")
     _add_column(connection, "users", "last_seen_at", "DATETIME")
     _add_column(connection, "users", "interactions", "INTEGER NOT NULL DEFAULT 0")
+    if "schedule_submissions" in inspect(connection).get_table_names():
+        _add_column(connection, "schedule_submissions", "source_filename", "VARCHAR(255)")
+        _add_column(connection, "schedule_submissions", "source_file_content", "BLOB")
+        _add_column(connection, "schedule_submissions", "source_media_type", "VARCHAR(100)")
 
 
 async def create_schema(engine: AsyncEngine) -> None:

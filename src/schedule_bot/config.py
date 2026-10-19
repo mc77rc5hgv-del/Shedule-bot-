@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     database_url: str = "sqlite+aiosqlite:///data/schedule.db"
     timezone: str = "Europe/Moscow"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-5"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

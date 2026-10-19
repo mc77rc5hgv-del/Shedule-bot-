@@ -1,7 +1,16 @@
+import io
 from html import escape
 
-from aiogram import F, Router
-from aiogram.types import BufferedInputFile, CallbackQuery
+from aiogram import Bot, F, Router
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from schedule_bot.config import Settings
+from schedule_bot.services.ai_recognition import (
+    AIRecognitionError,
+    recognize_schedule,
+    rows_to_csv,
+)
 
 from schedule_bot.keyboards import submission_help_keyboard
 
@@ -34,11 +43,11 @@ faculty,specialty,course,group,date,start_time,end_time,subject,teacher,room,typ
 async def submission_help(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         "<b>Добавить расписание своей группы</b>\n\n"
-        "1. Скачайте CSV-шаблон или подготовьте XLSX/CSV с помощью нейросети.\n"
-        "2. Заполните расписание только одной группы.\n"
-        "3. Отправьте готовый файл этому боту как документ.\n"
-        "4. Бот проверит файл и отправит заявку администратору.\n"
-        "5. После одобрения группа появится в общем списке, а вы получите уведомление.\n\n"
+        "1. Просто отправьте фото, скриншот или PDF — ИИ распознает расписание.\n"
+        "2. В подписи желательно указать факультет, направление, курс и группу.\n"
+        "3. Также можно отправить готовый XLSX/CSV или скачать шаблон.\n"
+        "4. Если данных не хватит, бот напишет, что нужно уточнить.\n"
+        "5. Результат уйдет администратору и появится в общем списке после одобрения.\n\n"
         "Обязательные колонки: факультет, курс, группа, дата, начало и предмет. "
         "Максимальный размер — 5 МБ.",
         reply_markup=submission_help_keyboard(),
@@ -63,3 +72,139 @@ async def submission_prompt(callback: CallbackQuery) -> None:
         f"<pre>{escape(PROMPT)}</pre>"
     )
     await callback.answer("Промпт отправлен")
+
+
+AI_MEDIA_TYPES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+}
+AI_MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+@router.message(F.photo)
+async def recognize_photo(
+    message: Message,
+    bot: Bot,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    photo = message.photo[-1]
+    await _recognize_media(
+        message=message,
+        bot=bot,
+        settings=settings,
+        session_factory=session_factory,
+        file_id=photo.file_id,
+        file_size=photo.file_size,
+        filename="schedule_photo.jpg",
+        media_type="image/jpeg",
+    )
+
+
+@router.message(F.document.mime_type.in_(AI_MEDIA_TYPES))
+async def recognize_document(
+    message: Message,
+    bot: Bot,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    document = message.document
+    await _recognize_media(
+        message=message,
+        bot=bot,
+        settings=settings,
+        session_factory=session_factory,
+        file_id=document.file_id,
+        file_size=document.file_size,
+        filename=document.file_name or "schedule_source",
+        media_type=document.mime_type,
+    )
+
+
+async def _recognize_media(
+    *,
+    message: Message,
+    bot: Bot,
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    file_id: str,
+    file_size: int | None,
+    filename: str,
+    media_type: str,
+) -> None:
+    if file_size and file_size > AI_MAX_FILE_SIZE:
+        await message.answer("Файл слишком большой. Максимальный размер для AI — 10 МБ.")
+        return
+    status = await message.answer(
+        "🤖 Распознаю расписание. Это может занять до двух минут…"
+    )
+    try:
+        telegram_file = await bot.get_file(file_id)
+        buffer = io.BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=buffer)
+        source_content = buffer.getvalue()
+        result = await recognize_schedule(
+            content=source_content,
+            media_type=media_type,
+            user_context=message.caption,
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_model,
+        )
+        if result.needs_info:
+            lines = [
+                "<b>Нужно уточнить данные</b>",
+                "",
+                *[f"• {escape(value)}" for value in result.questions],
+            ]
+            if result.missing_fields:
+                lines.extend(
+                    [
+                        "",
+                        "Не удалось определить: "
+                        + ", ".join(escape(value) for value in result.missing_fields),
+                    ]
+                )
+            lines.extend(
+                [
+                    "",
+                    "Отправьте файл повторно и добавьте подпись, например:",
+                    "<code>3 факультет, Лечебное дело, 2 курс, группа ЛД-21</code>",
+                ]
+            )
+            await status.edit_text("\n".join(lines))
+            return
+
+        csv_content = rows_to_csv(result.rows)
+        from schedule_bot.handlers.admin import store_user_submission
+
+        await store_user_submission(
+            message=message,
+            bot=bot,
+            settings=settings,
+            session_factory=session_factory,
+            status=status,
+            filename="recognized_schedule.csv",
+            content=csv_content,
+            rows=result.rows,
+            source_filename=filename,
+            source_content=source_content,
+            source_media_type=media_type,
+        )
+        if result.warnings:
+            await message.answer(
+                "<b>Замечания AI:</b>\n"
+                + "\n".join(f"• {escape(value)}" for value in result.warnings)
+            )
+    except AIRecognitionError as error:
+        await status.edit_text(
+            "<b>Не удалось распознать расписание</b>\n\n"
+            f"{escape(str(error))}\n\n"
+            "Попробуйте более четкое изображение или добавьте факультет, курс и группу "
+            "в подпись."
+        )
+    except Exception:
+        await status.edit_text("Произошла внутренняя ошибка при распознавании.")
+        raise
