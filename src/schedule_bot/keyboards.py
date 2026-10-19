@@ -40,15 +40,68 @@ def schedule_periods_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Ближайшие 3 дня", callback_data="schedule:three"),
                 InlineKeyboardButton(text="7 дней", callback_data="schedule:week"),
             ],
+            [
+                InlineKeyboardButton(
+                    text="🗓 Месяц по неделям", callback_data="schedule:month"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔎 Когда будет предмет?", callback_data="schedule:subject"
+                )
+            ],
             [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="nav:home")],
         ]
     )
-
 
 def schedule_result_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Другой период", callback_data="schedule:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav:home")],
+        ]
+    )
+
+
+def subjects_keyboard(
+    choices: list[tuple[str, int]], page: int = 0, page_size: int = 8
+) -> InlineKeyboardMarkup:
+    pages = max(1, (len(choices) + page_size - 1) // page_size)
+    page = min(max(page, 0), pages - 1)
+    builder = InlineKeyboardBuilder()
+    for subject, lesson_id in choices[page * page_size : (page + 1) * page_size]:
+        label = subject if len(subject) <= 45 else subject[:42] + "…"
+        builder.button(text=label, callback_data=f"subject:{lesson_id}")
+    builder.adjust(1)
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"subjects:{page - 1}")
+        )
+    navigation.append(
+        InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="subject:noop")
+    )
+    if page + 1 < pages:
+        navigation.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"subjects:{page + 1}")
+        )
+    if len(choices) > page_size:
+        builder.row(*navigation)
+    builder.row(
+        InlineKeyboardButton(text="⬅️ К расписанию", callback_data="schedule:menu")
+    )
+    return builder.as_markup()
+
+
+def subject_result_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔎 Другой предмет", callback_data="schedule:subject"
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Расписание", callback_data="schedule:menu")],
             [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav:home")],
         ]
     )

@@ -189,6 +189,51 @@ class LessonRepository:
             .limit(1)
         )
 
+    async def future_subjects(
+        self, group_id: int, current_date: date, current_time: time
+    ) -> list[tuple[str, int]]:
+        future = (
+            (Lesson.lesson_date > current_date)
+            | (
+                (Lesson.lesson_date == current_date)
+                & (Lesson.start_time >= current_time)
+            )
+        )
+        rows = await self.session.execute(
+            select(Lesson.subject, func.min(Lesson.id))
+            .where(Lesson.group_id == group_id, future)
+            .group_by(Lesson.subject)
+            .order_by(func.lower(Lesson.subject))
+        )
+        return list(rows)
+
+    async def get(self, lesson_id: int) -> Lesson | None:
+        return await self.session.get(Lesson, lesson_id)
+
+    async def next_subject(
+        self,
+        group_id: int,
+        subject: str,
+        current_date: date,
+        current_time: time,
+    ) -> Lesson | None:
+        return await self.session.scalar(
+            select(Lesson)
+            .where(
+                Lesson.group_id == group_id,
+                Lesson.subject == subject,
+                (
+                    (Lesson.lesson_date > current_date)
+                    | (
+                        (Lesson.lesson_date == current_date)
+                        & (Lesson.start_time >= current_time)
+                    )
+                ),
+            )
+            .order_by(Lesson.lesson_date, Lesson.start_time)
+            .limit(1)
+        )
+
     async def upsert(
         self,
         *,
