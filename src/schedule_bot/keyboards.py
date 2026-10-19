@@ -12,18 +12,26 @@ home_reply_keyboard = ReplyKeyboardMarkup(
 )
 
 
-def home_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(text="📅 Расписание", callback_data="schedule:menu"),
-            InlineKeyboardButton(text="⏭ Следующая пара", callback_data="schedule:next"),
-        ],
-        [
-            InlineKeyboardButton(text="👤 Моя группа", callback_data="nav:my_group"),
-            InlineKeyboardButton(text="🔄 Сменить группу", callback_data="nav:groups"),
-        ],
-        [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="nav:help")],
-    ]
+def home_keyboard(is_admin: bool = False, has_group: bool = True) -> InlineKeyboardMarkup:
+    if has_group:
+        rows = [
+            [
+                InlineKeyboardButton(text="📅 Расписание", callback_data="schedule:menu"),
+                InlineKeyboardButton(text="⏭ Следующая пара", callback_data="schedule:next"),
+            ],
+            [
+                InlineKeyboardButton(text="👤 Моя группа", callback_data="nav:my_group"),
+                InlineKeyboardButton(text="🔄 Сменить группу", callback_data="nav:groups"),
+            ],
+            [InlineKeyboardButton(text="➕ Добавить расписание", callback_data="submission:help")],
+            [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="nav:help")],
+        ]
+    else:
+        rows = [
+            [InlineKeyboardButton(text="🔎 Найти своё расписание", callback_data="nav:groups")],
+            [InlineKeyboardButton(text="➕ Добавить своё расписание", callback_data="submission:help")],
+            [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="nav:help")],
+        ]
     if is_admin:
         rows.append([InlineKeyboardButton(text="🛠 Админ-панель", callback_data="admin:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -160,6 +168,11 @@ def courses_keyboard(
         label = f"{course} курс" if course is not None else "Курс не указан"
         builder.button(text=f"🎓 {label}", callback_data=f"course:{representative_id}")
     builder.adjust(2)
+    builder.row(
+        InlineKeyboardButton(
+            text="➕ Нет моего курса", callback_data="submission:help"
+        )
+    )
     back_callback = (
         f"faculty_number:{faculty}" if FACULTY_SPECIALTIES[faculty] else "faculties"
     )
@@ -187,6 +200,11 @@ def groups_keyboard(groups, anchor_id: int, page: int = 0) -> InlineKeyboardMark
     if navigation:
         builder.row(*navigation)
     builder.row(
+        InlineKeyboardButton(
+            text="➕ Нет моей группы", callback_data="submission:help"
+        )
+    )
+    builder.row(
         InlineKeyboardButton(text="⬅️ К курсам", callback_data=f"back_courses:{anchor_id}")
     )
     return builder.as_markup()
@@ -203,6 +221,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🎓 Структура групп", callback_data="admin:groups"),
                 InlineKeyboardButton(text="🕘 История загрузок", callback_data="admin:imports"),
             ],
+            [InlineKeyboardButton(text="📨 Заявки на расписание", callback_data="admin:submissions")],
             [InlineKeyboardButton(text="📥 Как загрузить файл", callback_data="admin:help")],
             [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="nav:home")],
         ]
@@ -236,3 +255,66 @@ def admin_users_keyboard(page: int, pages: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⬅️ Админ-панель", callback_data="admin:home")],
         ]
     )
+
+
+def submission_help_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📄 Скачать CSV-шаблон", callback_data="submission:template")],
+            [InlineKeyboardButton(text="🤖 Промпт для нейросети", callback_data="submission:prompt")],
+            [InlineKeyboardButton(text="🔎 Найти расписание", callback_data="nav:groups")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav:home")],
+        ]
+    )
+
+
+def missing_schedule_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить расписание", callback_data="submission:help")],
+            [InlineKeyboardButton(text="⬅️ К факультетам", callback_data="faculties")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav:home")],
+        ]
+    )
+
+
+def submission_review_keyboard(submission_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Одобрить", callback_data=f"admin:submission:approve:{submission_id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отклонить", callback_data=f"admin:submission:reject:{submission_id}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📄 Получить файл",
+                    callback_data=f"admin:submission:file:{submission_id}",
+                )
+            ],
+        ]
+    )
+
+
+def admin_submissions_keyboard(items) -> InlineKeyboardMarkup:
+    rows = []
+    for item in items:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"📄 #{item.id}", callback_data=f"admin:submission:file:{item.id}"
+                ),
+                InlineKeyboardButton(
+                    text="✅", callback_data=f"admin:submission:approve:{item.id}"
+                ),
+                InlineKeyboardButton(
+                    text="❌", callback_data=f"admin:submission:reject:{item.id}"
+                ),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="admin:submissions")])
+    rows.append([InlineKeyboardButton(text="⬅️ Админ-панель", callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

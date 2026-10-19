@@ -93,6 +93,19 @@ def parse_schedule(filename: str, content: bytes) -> list[LessonRow]:
     return parsed
 
 
+def submission_identity(rows: list[LessonRow]) -> tuple[str, str, str | None, int]:
+    identities = {
+        (row.group, row.faculty, row.specialty, row.course)
+        for row in rows
+    }
+    if len(identities) != 1:
+        raise ImportValidationError(
+            "В пользовательской заявке должно быть расписание только одной группы "
+            "с одинаковыми факультетом, направлением и курсом."
+        )
+    return next(iter(identities))
+
+
 async def save_schedule(session: AsyncSession, rows: list[LessonRow]) -> ImportResult:
     groups = GroupRepository(session)
     lessons = LessonRepository(session)

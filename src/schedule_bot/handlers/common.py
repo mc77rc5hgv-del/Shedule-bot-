@@ -12,6 +12,7 @@ from schedule_bot.keyboards import (
     groups_keyboard,
     home_keyboard,
     home_reply_keyboard,
+    missing_schedule_keyboard,
     specialties_keyboard,
 )
 from schedule_bot.repositories import GroupRepository, UserRepository
@@ -32,18 +33,20 @@ def _group_details(group) -> str:
 
 async def _home_text(
     telegram_id: int, session_factory: async_sessionmaker[AsyncSession]
-) -> str:
+) -> tuple[str, bool]:
     async with session_factory() as session:
         user = await UserRepository(session).get_with_group(telegram_id)
     if user and user.group:
         return (
             "<b>Главное меню</b>\n"
             f"Ваша группа: {_group_details(user.group)}\n\n"
-            "Выберите нужный раздел:"
+            "Выберите нужный раздел:",
+            True,
         )
     return (
         "<b>Добро пожаловать в Shedule BOT</b>\n\n"
-        "Сначала выберите свою группу, затем вам станет доступно расписание."
+        "Найдите свою группу в общем списке или предложите расписание для добавления.",
+        False,
     )
 
 
@@ -55,10 +58,10 @@ async def home(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    text = await _home_text(message.from_user.id, session_factory)
+    text, has_group = await _home_text(message.from_user.id, session_factory)
     await message.answer(
         text,
-        reply_markup=home_keyboard(message.from_user.id in settings.admins),
+        reply_markup=home_keyboard(message.from_user.id in settings.admins, has_group),
     )
     await message.answer("Быстрый доступ:", reply_markup=home_reply_keyboard)
 
@@ -69,10 +72,10 @@ async def home_callback(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    text = await _home_text(callback.from_user.id, session_factory)
+    text, has_group = await _home_text(callback.from_user.id, session_factory)
     await callback.message.edit_text(
         text,
-        reply_markup=home_keyboard(callback.from_user.id in settings.admins),
+        reply_markup=home_keyboard(callback.from_user.id in settings.admins, has_group),
     )
     await callback.answer()
 
@@ -116,7 +119,9 @@ async def help_message(event: Message | CallbackQuery) -> None:
         "1. Выберите факультет, направление, курс и группу.\n"
         "2. Откройте «Расписание» и укажите период.\n"
         "3. Кнопка «Следующая пара» сразу покажет ближайшее занятие.\n\n"
-        "Сменить группу можно в главном меню. Бот запомнит ваш выбор."
+        "Сменить группу можно в главном меню. Бот запомнит ваш выбор.\n\n"
+        "Если вашей группы нет, нажмите «Добавить расписание»: бот выдаст шаблон "
+        "и отправит заполненный файл администратору на проверку."
     )
     if isinstance(event, CallbackQuery):
         await event.message.edit_text(text, reply_markup=home_keyboard())
@@ -172,7 +177,13 @@ async def _show_courses(
     async with session_factory() as session:
         choices = await GroupRepository(session).list_courses(faculty, specialty)
     if not choices:
-        await callback.answer("Для этого раздела расписание пока не загружено", show_alert=True)
+        await callback.message.edit_text(
+            "<b>Расписание пока не найдено</b>\n\n"
+            "Вы можете добавить расписание своей группы. Бот проверит файл и отправит "
+            "его администратору; после одобрения группа появится в общем списке.",
+            reply_markup=missing_schedule_keyboard(),
+        )
+        await callback.answer()
         return
     title = f"{faculty} факультет"
     if specialty:

@@ -1,6 +1,6 @@
 from datetime import date, datetime, time
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, String, Time, UniqueConstraint, func
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Time, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from schedule_bot.db import Base
@@ -68,3 +68,22 @@ class ImportLog(Base):
     imported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
+
+
+class ScheduleSubmission(Base):
+    __tablename__ = "schedule_submissions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    file_content: Mapped[bytes] = mapped_column(LargeBinary)
+    faculty: Mapped[str] = mapped_column(String(150), index=True)
+    specialty: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    course: Mapped[int] = mapped_column(Integer)
+    group_name: Mapped[str] = mapped_column(String(100), index=True)
+    total_rows: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from schedule_bot.models import Group, ImportLog, Lesson, UNSPECIFIED_FACULTY, User
+from schedule_bot.models import (\n    Group, ImportLog, Lesson, ScheduleSubmission, UNSPECIFIED_FACULTY, User,\n)
 
 
 class GroupRepository:
@@ -265,6 +265,68 @@ class LessonRepository:
         return created
 
 
+class SubmissionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        *,
+        user_telegram_id: int,
+        username: str | None,
+        filename: str,
+        file_content: bytes,
+        faculty: str,
+        specialty: str | None,
+        course: int,
+        group_name: str,
+        total_rows: int,
+    ) -> ScheduleSubmission:
+        item = ScheduleSubmission(
+            user_telegram_id=user_telegram_id,
+            username=username,
+            filename=filename[:255],
+            file_content=file_content,
+            faculty=faculty,
+            specialty=specialty,
+            course=course,
+            group_name=group_name,
+            total_rows=total_rows,
+        )
+        self.session.add(item)
+        await self.session.flush()
+        return item
+
+    async def get(self, submission_id: int) -> ScheduleSubmission | None:
+        return await self.session.get(ScheduleSubmission, submission_id)
+
+    async def pending(self, limit: int = 20) -> list[ScheduleSubmission]:
+        result = await self.session.scalars(
+            select(ScheduleSubmission)
+            .where(ScheduleSubmission.status == "pending")
+            .order_by(ScheduleSubmission.created_at, ScheduleSubmission.id)
+            .limit(limit)
+        )
+        return list(result)
+
+    async def pending_count(self) -> int:
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(ScheduleSubmission)
+                .where(ScheduleSubmission.status == "pending")
+            )
+            or 0
+        )
+
+    async def review(
+        self, item: ScheduleSubmission, status: str, admin_telegram_id: int
+    ) -> None:
+        item.status = status
+        item.reviewed_by = admin_telegram_id
+        item.reviewed_at = datetime.now(UTC)
+
+
 class StatisticsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -285,6 +347,7 @@ class StatisticsRepository:
             )
         result["groups"] = await self.session.scalar(select(func.count()).select_from(Group)) or 0
         result["lessons"] = await self.session.scalar(select(func.count()).select_from(Lesson)) or 0
+        result["pending_submissions"] = await SubmissionRepository(self.session).pending_count()
         result["upcoming"] = (
             await self.session.scalar(
                 select(func.count()).select_from(Lesson).where(Lesson.lesson_date >= today)
