@@ -28,20 +28,55 @@ MONTHS = (
     "ноября",
     "декабря",
 )
+MONTHS_TITLES = (
+    "",
+    "Январь",
+    "Февраль",
+    "Март",
+    "Апрель",
+    "Май",
+    "Июнь",
+    "Июль",
+    "Август",
+    "Сентябрь",
+    "Октябрь",
+    "Ноябрь",
+    "Декабрь",
+)
 
 
 def period_dates(today: date, period: str) -> tuple[date, date, str]:
+    if period == "month":
+        start = today.replace(day=1)
+        next_month = (
+            start.replace(year=start.year + 1, month=1)
+            if start.month == 12
+            else start.replace(month=start.month + 1)
+        )
+        end = next_month - timedelta(days=1)
+        return start, end, f"Расписание на {MONTHS[start.month]}"
+
     periods = {
         "today": (0, 0, "Расписание на сегодня"),
         "tomorrow": (1, 1, "Расписание на завтра"),
         "three": (0, 2, "Расписание на ближайшие 3 дня"),
         "week": (0, 6, "Расписание на ближайшие 7 дней"),
-        "month": (0, 29, "Расписание на ближайшие 30 дней"),
     }
     if period not in periods:
         raise ValueError("Неизвестный период")
     start_delta, end_delta, title = periods[period]
     return today + timedelta(days=start_delta), today + timedelta(days=end_delta), title
+
+
+def calendar_weeks(start: date, end: date) -> list[tuple[date, date]]:
+    weeks = []
+    cursor = start
+    while cursor <= end:
+        days_until_sunday = 6 - cursor.weekday()
+        week_end = min(cursor + timedelta(days=days_until_sunday), end)
+        weeks.append((cursor, week_end))
+        cursor = week_end + timedelta(days=1)
+    return weeks
 
 
 def format_schedule(group_name: str, start: date, end: date, lessons: list[Lesson]) -> list[str]:
@@ -59,14 +94,13 @@ def format_month_by_weeks(
     group_name: str, start: date, end: date, lessons: list[Lesson]
 ) -> list[str]:
     by_date = _group_by_date(lessons)
-    messages: list[str] = []
-    week_start = start
-    week_number = 1
-    while week_start <= end:
-        week_end = min(week_start + timedelta(days=6), end)
+    weeks = calendar_weeks(start, end)
+    pages = []
+    for index, (week_start, week_end) in enumerate(weeks, start=1):
         header = (
             f"<b>{escape(group_name)}</b>\n"
-            f"<b>Неделя {week_number}</b> · "
+            f"<b>{MONTHS_TITLES[start.month]} {start.year}</b> · "
+            f"неделя {index}/{len(weeks)}\n"
             f"{week_start.day} {MONTHS[week_start.month]} — "
             f"{week_end.day} {MONTHS[week_end.month]}"
         )
@@ -78,10 +112,8 @@ def format_month_by_weeks(
             current += timedelta(days=1)
         if not blocks:
             blocks = ["Занятий на этой неделе нет"]
-        messages.extend(_split_blocks(header, blocks))
-        week_start = week_end + timedelta(days=1)
-        week_number += 1
-    return messages
+        pages.append(_split_blocks(header, blocks)[0])
+    return pages
 
 
 def _group_by_date(lessons: list[Lesson]) -> dict[date, list[Lesson]]:

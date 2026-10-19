@@ -63,6 +63,28 @@ def schedule_result_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def month_pages_keyboard(page: int, pages: int) -> InlineKeyboardMarkup:
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"month:{page - 1}")
+        )
+    navigation.append(
+        InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="month:noop")
+    )
+    if page + 1 < pages:
+        navigation.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"month:{page + 1}")
+        )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            navigation,
+            [InlineKeyboardButton(text="⬅️ К расписанию", callback_data="schedule:menu")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav:home")],
+        ]
+    )
+
+
 def subjects_keyboard(
     choices: list[tuple[str, int]], page: int = 0, page_size: int = 8
 ) -> InlineKeyboardMarkup:

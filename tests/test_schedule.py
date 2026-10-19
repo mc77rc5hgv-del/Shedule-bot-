@@ -2,6 +2,7 @@ from datetime import date, time
 from types import SimpleNamespace
 
 from schedule_bot.services.schedule import (
+    calendar_weeks,
     format_month_by_weeks,
     format_schedule,
     period_dates,
@@ -15,11 +16,18 @@ def test_three_day_period():
     assert "3 дня" in title
 
 
-def test_month_period_is_thirty_days():
+def test_month_period_is_current_calendar_month():
     start, end, title = period_dates(date(2026, 10, 19), "month")
-    assert start == date(2026, 10, 19)
-    assert end == date(2026, 11, 17)
-    assert "30 дней" in title
+    assert start == date(2026, 10, 1)
+    assert end == date(2026, 10, 31)
+    assert "октября" in title
+
+
+def test_calendar_weeks_are_monday_to_sunday():
+    weeks = calendar_weeks(date(2026, 10, 1), date(2026, 10, 31))
+    assert weeks[0] == (date(2026, 10, 1), date(2026, 10, 4))
+    assert weeks[1] == (date(2026, 10, 5), date(2026, 10, 11))
+    assert weeks[-1] == (date(2026, 10, 26), date(2026, 10, 31))
 
 
 def test_format_escapes_html():
@@ -37,10 +45,10 @@ def test_format_escapes_html():
     assert "09:00–10:30" in messages[0]
 
 
-def test_month_is_split_into_weeks():
-    messages = format_month_by_weeks(
-        "ИС-21", date(2026, 10, 19), date(2026, 11, 17), []
+def test_month_has_one_page_per_calendar_week():
+    pages = format_month_by_weeks(
+        "ИС-21", date(2026, 10, 1), date(2026, 10, 31), []
     )
-    assert len(messages) == 5
-    assert "Неделя 1" in messages[0]
-    assert "Неделя 5" in messages[-1]
+    assert len(pages) == 5
+    assert "неделя 1/5" in pages[0]
+    assert "неделя 5/5" in pages[-1]

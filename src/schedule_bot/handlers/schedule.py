@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from schedule_bot.config import Settings
 from schedule_bot.keyboards import (
+    month_pages_keyboard,
     schedule_periods_keyboard,
     schedule_result_keyboard,
     subject_result_keyboard,
@@ -44,7 +45,6 @@ async def schedule_menu(callback: CallbackQuery) -> None:
             "schedule:tomorrow",
             "schedule:three",
             "schedule:week",
-            "schedule:month",
         }
     )
 )
@@ -61,6 +61,51 @@ async def schedule_callback(
         session_factory,
         settings,
         edit=True,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "schedule:month")
+async def current_month(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await _show_month(callback, session_factory, settings, page=0)
+
+
+@router.callback_query(F.data.startswith("month:"))
+async def month_page(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    value = callback.data.split(":", 1)[1]
+    if value == "noop":
+        await callback.answer()
+        return
+    await _show_month(callback, session_factory, settings, page=int(value))
+
+
+async def _show_month(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    page: int,
+) -> None:
+    today = datetime.now(settings.tz).date()
+    start, end, _ = period_dates(today, "month")
+    async with session_factory() as session:
+        user = await UserRepository(session).get_with_group(callback.from_user.id)
+        if user is None or user.group is None:
+            await callback.answer("Сначала выберите группу", show_alert=True)
+            return
+        lessons = await LessonRepository(session).between(user.group.id, start, end)
+        pages = format_month_by_weeks(user.group.name, start, end, lessons)
+    page = min(max(page, 0), len(pages) - 1)
+    await callback.message.edit_text(
+        pages[page],
+        reply_markup=month_pages_keyboard(page, len(pages)),
     )
     await callback.answer()
 
@@ -223,20 +268,12 @@ async def _send_period(
                 await message.answer("Сначала выберите группу: /group")
             return
         lessons = await LessonRepository(session).between(user.group.id, start, end)
-        messages = (
-            format_month_by_weeks(user.group.name, start, end, lessons)
-            if period == "month"
-            else format_schedule(user.group.name, start, end, lessons)
-        )
+        messages = format_schedule(user.group.name, start, end, lessons)
 
     if edit:
-        await message.edit_text(messages[0])
-        for text in messages[1:-1]:
+        await message.edit_text(messages[0], reply_markup=schedule_result_keyboard())
+        for text in messages[1:]:
             await message.answer(text)
-        if len(messages) > 1:
-            await message.answer(messages[-1], reply_markup=schedule_result_keyboard())
-        else:
-            await message.edit_reply_markup(reply_markup=schedule_result_keyboard())
     else:
         for index, text in enumerate(messages):
             await message.answer(
